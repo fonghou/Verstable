@@ -851,6 +851,14 @@ VT_CAT( NAME, _itr ) VT_CAT( NAME, _erase_itr )( NAME *table, VT_CAT( NAME, _itr
 #define MAX_LOAD 0.9
 #endif
 
+#include "arena.h"
+inline static void* arena_malloc(size_t size, Arena **arena) {
+  return arena_alloc(*arena, size, sizeof(max_align_t), 1, NOINIT);
+}
+
+#define MALLOC_FN   arena_malloc
+#define FREE_FN     (void)0;
+
 #if !defined( MALLOC ) || !defined( FREE )
 #include <stdlib.h>
 #endif
