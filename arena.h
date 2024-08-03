@@ -98,8 +98,7 @@ static inline Arena newarena(byte **mem, ssize size) {
   return a;
 }
 
-__attribute((malloc, alloc_size(2, 4), alloc_align(3))) static inline
-void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
+static inline void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
   // clang-format on
   byte *r = 0;
   // sync [2]
