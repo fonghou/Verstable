@@ -56,7 +56,7 @@ enum {
 #define ARENA_NEW3(a, t, n)            (t *)arena_alloc(a, sizeof(t), alignof(t), n, 0)
 #define ARENA_NEW4(a, t, n, z)         (t *)arena_alloc(a, sizeof(t), alignof(t), n, z)
 
-#define ArenaOOM(A)                              \
+#define ARENA_OOM(A)                              \
   ({                                             \
     Arena *a_ = (A);                             \
     a_->oomjmp = New(a_, void *, 5, SOFTFAIL);   \
@@ -72,24 +72,28 @@ enum {
     s_->data + s_->len++;                                        \
   })
 
-#ifdef NDEBUG
-#  define LogArena(A)
-#else
-#  define LogArena(A)                                                   \
+#ifdef LOGGING
+#  define ARENA_LOG(A)                                                   \
      fprintf(stderr, "%s:%d: Arena " #A "\tbeg=%ld end=%ld diff=%ld\n", \
              __FILE__,                                                  \
              __LINE__,                                                  \
             (uintptr_t)(*(A).beg),                                      \
             (uintptr_t)(A).end,                                         \
             (ssize)((A).end - (*(A).beg)))
+#else
+#  define ARENA_LOG(A)   ((void)0)
 #endif
 
-#if defined(__GNUC__) && !defined(__COSMOCC__)
-#  define assert(c)  while (!(c)) __builtin_unreachable()
-#elif defined(NDEBUG) && defined(_MSC_VER)
-#  define assert(c)  do if (!(c)) __debugbreak(); while (0)
-#else
+#ifndef NDEBUG
 #  include <assert.h>
+#elif defined(__GNUC__) // -fsantiize=undefined -fsanitize-trap=unreachable
+#  define assert(c)  do if (!(c)) __builtin_unreachable(); while(0)
+#elif defined(_MSC_VER)
+#  define assert(c)  do if (!(c)) __debugbreak(); while(0)
+#elif defined(__x86_64__)
+#  define assert(c)  do if (!(c)) __asm__("int3; nop"); while(0)
+#else
+#  define assert(c)  do if (!(c)) __builtin_trap(); while(0)
 #endif
 // clang-format on
 
@@ -115,7 +119,7 @@ static inline Arena getscratch(Arena *a) {
   return scratch;
 }
 
-static inline void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
+static inline void *arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
   byte *ret = 0;
 
   if (isscratch(a)) {
@@ -123,27 +127,27 @@ static inline void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, 
     if (*a->beg > newend) {
       a->end = newend;
     } else {
-      goto OOM_EXIT;
+      goto oomjmp;
     }
   }
 
   if (*a->beg < a->end) {
     ssize avail = a->end - *a->beg;
     ssize padding = -(uintptr_t)*a->beg & (align - 1);
-    if (count > (avail - padding) / size) goto OOM_EXIT;
+    if (count > (avail - padding) / size) goto oomjmp;
     ret = *a->beg + padding;
     *a->beg += padding + size * count;
   } else {
     ssize avail = *a->beg - a->end;
     ssize padding = +(uintptr_t)*a->beg & (align - 1);
-    if (count > (avail - padding) / size) goto OOM_EXIT;
+    if (count > (avail - padding) / size) goto oomjmp;
     *a->beg -= padding + size * count;
     ret = *a->beg;
   }
 
   return flags & NOINIT ? ret : memset(ret, 0, size * count);
 
-OOM_EXIT:
+oomjmp:
   if (flags & SOFTFAIL || !a->oomjmp) return NULL;
 #ifndef OOM
   assert(a->oomjmp);
@@ -161,18 +165,17 @@ static inline void slice_grow(void *slice, ssize size, ssize align, Arena *a) {
   } replica;
   memcpy(&replica, slice, sizeof(replica));
 
-  int grow = 16;
+  const int grow = 32;
 
-  if (!replica.data) {
+  if (!replica.cap) {
     replica.cap = grow;
     replica.data = arena_alloc(a, size, align, replica.cap, 0);
-  } else if ((*a->beg < a->end &&
-              ((uintptr_t)*a->beg - size * replica.cap == (uintptr_t)replica.data))) {
+  } else if ((*a->beg < a->end) &&
+             ((uintptr_t)*a->beg - size * replica.cap == (uintptr_t)replica.data)) {
     // grow in place
     arena_alloc(a, size, 1, grow, 0);
     replica.cap += grow;
   } else {
-    // grow in move
     replica.cap += grow;
     void *data = arena_alloc(a, size, align, replica.cap, 0);
     void *src = replica.data;
