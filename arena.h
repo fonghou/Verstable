@@ -72,9 +72,7 @@ enum {
     s_->data + s_->len++;                                        \
   })
 
-#ifdef NDEBUG
-#  define LogArena(A)
-#else
+#ifdef LOGGING
 #  define LogArena(A)                                                   \
      fprintf(stderr, "%s:%d: Arena " #A "\tbeg=%ld end=%ld diff=%ld\n", \
              __FILE__,                                                  \
@@ -82,14 +80,20 @@ enum {
             (uintptr_t)(*(A).beg),                                      \
             (uintptr_t)(A).end,                                         \
             (ssize)((A).end - (*(A).beg)))
+#else
+#  define LogArena(A)   ((void)0)
 #endif
 
-#if defined(__GNUC__) && !defined(__COSMOCC__)
-#  define assert(c)  while (!(c)) __builtin_unreachable()
-#elif defined(NDEBUG) && defined(_MSC_VER)
-#  define assert(c)  do if (!(c)) __debugbreak(); while (0)
-#else
+#ifndef NDEBUG
 #  include <assert.h>
+#elif defined(__GNUC__) // -fsantiize=undefined -fsanitize-trap
+#  define assert(c)  do if (!(c)) __builtin_unreachable(); while(0)
+#elif defined(_MSC_VER)
+#  define assert(c)  do if (!(c)) __debugbreak(); while(0)
+#elif defined(__x86_64__)
+#  define assert(c)  do if (!(c)) __asm__("int3; nop"); while(0)
+#else
+#  define assert(c)  do if (!(c)) __builtin_trap(); while(0)
 #endif
 // clang-format on
 
@@ -115,7 +119,7 @@ static inline Arena getscratch(Arena *a) {
   return scratch;
 }
 
-static inline void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
+static inline void *arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
   byte *ret = 0;
 
   if (isscratch(a)) {
@@ -166,13 +170,12 @@ static inline void slice_grow(void *slice, ssize size, ssize align, Arena *a) {
   if (!replica.data) {
     replica.cap = grow;
     replica.data = arena_alloc(a, size, align, replica.cap, 0);
-  } else if ((*a->beg < a->end &&
-              ((uintptr_t)*a->beg - size * replica.cap == (uintptr_t)replica.data))) {
+  } else if ((*a->beg < a->end) &&
+             ((uintptr_t)*a->beg - size * replica.cap == (uintptr_t)replica.data)) {
     // grow in place
     arena_alloc(a, size, 1, grow, 0);
     replica.cap += grow;
   } else {
-    // grow in move
     replica.cap += grow;
     void *data = arena_alloc(a, size, align, replica.cap, 0);
     void *src = replica.data;
