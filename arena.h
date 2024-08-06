@@ -48,6 +48,8 @@ enum {
   free(buffer);
 
 */
+
+// clang-format off
 #define New(...)                       ARENA_NEWX(__VA_ARGS__, ARENA_NEW4, ARENA_NEW3, ARENA_NEW2)(__VA_ARGS__)
 #define ARENA_NEWX(a, b, c, d, e, ...) e
 #define ARENA_NEW2(a, t)               (t *)arena_alloc(a, sizeof(t), alignof(t), 1, 0)
@@ -70,7 +72,6 @@ enum {
     s_->data + s_->len++;                                        \
   })
 
-// clang-format off
 #ifdef NDEBUG
 #  define LogArena(A)
 #else
@@ -90,6 +91,7 @@ enum {
 #else
 #  include <assert.h>
 #endif
+// clang-format on
 
 static inline Arena newarena(byte **mem, ssize size) {
   Arena a = {0};
@@ -98,18 +100,30 @@ static inline Arena newarena(byte **mem, ssize size) {
   return a;
 }
 
+static inline bool isscratch(Arena *a) {
+  return !!a->persist;
+}
+
+static inline Arena getscratch(Arena *a) {
+  if (isscratch(a)) return *a;
+
+  Arena scratch = {0};
+  scratch.beg = &a->end;
+  scratch.end = *a->beg;
+  scratch.oomjmp = a->oomjmp;
+  scratch.persist = a;
+  return scratch;
+}
+
 static inline void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, unsigned flags) {
-  // clang-format on
-  byte *r = 0;
-  // sync [2]
-  if (a->persist) {
-    byte *beg = *a->persist->beg;
-    if (*a->beg < a->end) {
-      a->end = beg < a->end ? beg : a->end;
-      if (*a->beg > a->end) goto OOM_EXIT;
+  byte *ret = 0;
+
+  if (isscratch(a)) {
+    byte *newend = *a->persist->beg;
+    if (*a->beg > newend) {
+      a->end = newend;
     } else {
-      a->end = a->end < beg ? beg : a->end;
-      if (*a->beg < a->end) goto OOM_EXIT;
+      goto OOM_EXIT;
     }
   }
 
@@ -117,17 +131,17 @@ static inline void* arena_alloc(Arena *a, ssize size, ssize align, ssize count, 
     ssize avail = a->end - *a->beg;
     ssize padding = -(uintptr_t)*a->beg & (align - 1);
     if (count > (avail - padding) / size) goto OOM_EXIT;
-    r = *a->beg + padding;
+    ret = *a->beg + padding;
     *a->beg += padding + size * count;
   } else {
     ssize avail = *a->beg - a->end;
     ssize padding = +(uintptr_t)*a->beg & (align - 1);
     if (count > (avail - padding) / size) goto OOM_EXIT;
     *a->beg -= padding + size * count;
-    r = *a->beg;
+    ret = *a->beg;
   }
 
-  return flags & NOINIT ? r : memset(r, 0, size * count);
+  return flags & NOINIT ? ret : memset(ret, 0, size * count);
 
 OOM_EXIT:
   if (flags & SOFTFAIL || !a->oomjmp) return NULL;
@@ -169,21 +183,6 @@ static inline void slice_grow(void *slice, ssize size, ssize align, Arena *a) {
   }
 
   memcpy(slice, &replica, sizeof(replica));
-}
-
-static inline bool isscratch(Arena *a) {
-  return *a->beg > a->end;
-}
-
-static inline Arena getscratch(Arena *a) {
-  if (isscratch(a)) return *a;  // guard [2]
-
-  Arena scratch = {0};
-  scratch.beg = &a->end;
-  scratch.end = *a->beg;
-  scratch.oomjmp = a->oomjmp;
-  scratch.persist = a;
-  return scratch;
 }
 
 #endif  // ARENA_H
