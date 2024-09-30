@@ -12,6 +12,21 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+
+#if defined(__GNUC__) || defined(__clang__)
+void autofree_impl(void *p) {
+  free(*((void **)p));
+}
+#define autofree __attribute__((__cleanup__(autofree_impl)))
+#endif
+
+#ifdef __COSMOCC__
+#define autofree
+#include <cosmo.h>
+#else
+#define gc(THING) (THING)
+#endif
 
 typedef ptrdiff_t ssize;
 typedef unsigned char byte;
