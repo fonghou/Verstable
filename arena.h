@@ -60,7 +60,7 @@ enum {
   thing *y = New(&scratch, thing);
   thing *z = helper(scratch);
 
-  free(buffer);
+  free(heap);
 
 */
 
@@ -146,21 +146,21 @@ static inline void *arena_alloc(Arena *a, ssize size, ssize align, ssize count, 
     }
   }
 
-  if (*a->beg < a->end) {
-    ssize avail = a->end - *a->beg;
-    ssize padding = -(uintptr_t)*a->beg & (align - 1);
-    if (count > (avail - padding) / size) goto oomjmp;
-    ret = *a->beg + padding;
-    *a->beg += padding + size * count;
-  } else {
-    ssize avail = *a->beg - a->end;
-    ssize padding = +(uintptr_t)*a->beg & (align - 1);
-    if (count > (avail - padding) / size) goto oomjmp;
-    *a->beg -= padding + size * count;
-    ret = *a->beg;
+  int is_forward = *a->beg < a->end;
+  ssize avail = is_forward ? (a->end - *a->beg) : (*a->beg - a->end);
+  ssize padding = (is_forward ? -1 : 1) * (uintptr_t)*a->beg & (align - 1);
+  bool oom = count > (avail - padding) / size;
+  if (oom) {
+    goto oomjmp;
   }
 
-  return flags & NOINIT ? ret : memset(ret, 0, size * count);
+  // Calculate new position
+  ssize total_size = size * count;
+  ssize offset = (is_forward ? 1 : -1) * (padding + total_size);
+  *a->beg += offset;
+  ret = is_forward ? (*a->beg - total_size) : *a->beg;
+
+  return flags & NOINIT ? ret : memset(ret, 0, total_size);
 
 oomjmp:
   if (flags & SOFTFAIL || !a->oomjmp) return NULL;
