@@ -438,14 +438,14 @@ License (MIT):
 
 #ifdef ARENA_H
 #define CTX_TY      Arena *
-#define MALLOC_FN   _malloc
-#define FREE_FN     _free
+#define MALLOC_FN   _vt_malloc
+#define FREE_FN     _vt_free
 
-inline static void* _malloc(size_t size, Arena **ctx) {
+inline static void* _vt_malloc(size_t size, Arena **ctx) {
   return arena_alloc(*ctx, size, sizeof(max_align_t), 1, NOINIT);
 }
 
-inline static void _free(void *ptr, size_t size, Arena **ctx ) { }
+inline static void _vt_free(void *ptr, size_t size, Arena **ctx ) { }
 #endif
 
 // Two-way concatenation macro.

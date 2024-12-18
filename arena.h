@@ -14,10 +14,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+// clang-format off
 #if defined(__GNUC__) && !defined(__COSMOCC__)
-void autofree_impl(void *p) {
-  free(*((void **)p));
-}
+void autofree_impl(void *p) { free(*((void **)p)); }
 #define autofree __attribute__((__cleanup__(autofree_impl)))
 #else
 #define autofree
@@ -29,6 +28,14 @@ void autofree_impl(void *p) {
 #define gc(THING) (THING)
 #endif
 
+#if defined(__GNUC__) && !defined(__APPLE__)
+#define _JBLEN  5
+#define setjmp  __builtin_setjmp
+#define longjmp __builtin_longjmp
+#else
+#include <setjmp.h>
+#endif
+
 typedef ptrdiff_t ssize;
 typedef unsigned char byte;
 
@@ -36,7 +43,7 @@ typedef struct Arena Arena;
 struct Arena {
   byte **beg;
   byte *end;
-  void **oomjmp;
+  void **jmpbuf;
   Arena *persist;
 };
 
@@ -65,7 +72,6 @@ enum {
 
 */
 
-// clang-format off
 #define New(...)                       ARENA_NEWX(__VA_ARGS__, ARENA_NEW4, ARENA_NEW3, ARENA_NEW2)(__VA_ARGS__)
 #define ARENA_NEWX(a, b, c, d, e, ...) e
 #define ARENA_NEW2(a, t)               (t *)arena_alloc(a, sizeof(t), alignof(t), 1, 0)
@@ -74,11 +80,11 @@ enum {
 
 #define ARENA_PUSH(Local, A)   (Local).beg = &(byte*){*(A).beg}
 
-#define ARENA_OOM(A)                             \
-  ({                                             \
-    Arena *a_ = (A);                             \
-    a_->oomjmp = New(a_, void *, 5, SOFTFAIL);   \
-    !a_->oomjmp || __builtin_setjmp(a_->oomjmp); \
+#define ARENA_OOM(A)                               \
+  ({                                               \
+    Arena *a_ = (A);                               \
+    a_->jmpbuf = New(a_, void*, _JBLEN, SOFTFAIL); \
+    !a_->jmpbuf || setjmp(a_->jmpbuf);             \
   })
 
 #define Push(S, A)                                               \
@@ -113,7 +119,6 @@ enum {
 #else
 #  define assert(c)  do if (!(c)) __builtin_trap(); while(0)
 #endif
-// clang-format on
 
 static inline Arena newarena(byte **mem, ssize size) {
   Arena a = {0};
@@ -132,7 +137,7 @@ static inline Arena getscratch(Arena *a) {
   Arena scratch = {0};
   scratch.beg = &a->end;
   scratch.end = *a->beg;
-  scratch.oomjmp = a->oomjmp;
+  scratch.jmpbuf = a->jmpbuf;
   scratch.persist = a;
   return scratch;
 }
@@ -166,10 +171,10 @@ static inline void *arena_alloc(Arena *a, ssize size, ssize align, ssize count, 
   return flags & NOINIT ? ret : memset(ret, 0, total_size);
 
 oomjmp:
-  if (flags & SOFTFAIL || !a->oomjmp) return NULL;
+  if (flags & SOFTFAIL || !a->jmpbuf) return NULL;
 #ifndef OOM
-  assert(a->oomjmp);
-  __builtin_longjmp(a->oomjmp, 1);
+  assert(a->jmpbuf);
+  longjmp(a->jmpbuf, 1);
 #else
   assert(!OOM);
 #endif
