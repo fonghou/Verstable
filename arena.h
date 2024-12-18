@@ -14,15 +14,16 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__GNUC__) && !defined(__COSMOCC__)
 void autofree_impl(void *p) {
   free(*((void **)p));
 }
 #define autofree __attribute__((__cleanup__(autofree_impl)))
+#else
+#define autofree
 #endif
 
 #ifdef __COSMOCC__
-#define autofree
 #include <cosmo.h>
 #else
 #define gc(THING) (THING)
@@ -71,7 +72,9 @@ enum {
 #define ARENA_NEW3(a, t, n)            (t *)arena_alloc(a, sizeof(t), alignof(t), n, 0)
 #define ARENA_NEW4(a, t, n, z)         (t *)arena_alloc(a, sizeof(t), alignof(t), n, z)
 
-#define ARENA_OOM(A)                              \
+#define ARENA_PUSH(Local, A)   (Local).beg = &(byte*){*(A).beg}
+
+#define ARENA_OOM(A)                             \
   ({                                             \
     Arena *a_ = (A);                             \
     a_->oomjmp = New(a_, void *, 5, SOFTFAIL);   \
@@ -88,7 +91,7 @@ enum {
   })
 
 #ifdef LOGGING
-#  define ARENA_LOG(A)                                                   \
+#  define ARENA_LOG(A)                                                  \
      fprintf(stderr, "%s:%d: Arena " #A "\tbeg=%ld end=%ld diff=%ld\n", \
              __FILE__,                                                  \
              __LINE__,                                                  \
