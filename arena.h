@@ -29,9 +29,9 @@ void autofree_impl(void *p) { free(*((void **)p)); }
 #endif
 
 #if defined(__GNUC__) && !defined(__APPLE__)
-#define _JBLEN  5
 #define setjmp  __builtin_setjmp
 #define longjmp __builtin_longjmp
+#define _JBLEN  5
 #else
 #include <setjmp.h>
 #endif
@@ -80,11 +80,11 @@ enum {
 
 #define ARENA_PUSH(Local, A)   (Local).beg = &(byte*){*(A).beg}
 
-#define ARENA_OOM(A)                               \
-  ({                                               \
-    Arena *a_ = (A);                               \
-    a_->jmpbuf = New(a_, void*, _JBLEN, SOFTFAIL); \
-    !a_->jmpbuf || setjmp(a_->jmpbuf);             \
+#define ARENA_OOM(A)                                \
+  ({                                                \
+    Arena *a_ = (A);                                \
+    a_->jmpbuf = New(a_, void *, _JBLEN, SOFTFAIL); \
+    !a_->jmpbuf || setjmp((void *)a_->jmpbuf);      \
   })
 
 #define Push(S, A)                                               \
@@ -174,7 +174,7 @@ oomjmp:
   if (flags & SOFTFAIL || !a->jmpbuf) return NULL;
 #ifndef OOM
   assert(a->jmpbuf);
-  longjmp(a->jmpbuf, 1);
+  longjmp((void *)a->jmpbuf, 1);
 #else
   assert(!OOM);
 #endif
@@ -210,5 +210,19 @@ static inline void slice_grow(void *slice, ssize size, ssize align, Arena *a) {
 
   memcpy(slice, &replica, sizeof(replica));
 }
+
+#ifdef GLOBAL_ARENA
+#define GLOBAL_ARENA_MALLOC_FN GLOBAL_ARENA##_malloc
+#define GLOBAL_ARENA_FREE_FN GLOBAL_ARENA##_free
+
+Arena *GLOBAL_ARENA = NULL;
+
+void *GLOBAL_ARENA_MALLOC_FN(size_t size) {
+  assert(GLOBAL_ARENA);
+  return arena_alloc(GLOBAL_ARENA, size, sizeof(max_align_t), 1, 0);
+}
+
+void GLOBAL_ARENA_FREE_FN(void *ptr) {}
+#endif
 
 #endif  // ARENA_H
