@@ -211,4 +211,18 @@ static inline void slice_grow(void *slice, ssize size, ssize align, Arena *a) {
   memcpy(slice, &replica, sizeof(replica));
 }
 
+#ifdef GLOBAL_ARENA
+#define GLOBAL_ARENA_MALLOC_FN GLOBAL_ARENA##_malloc
+#define GLOBAL_ARENA_FREE_FN GLOBAL_ARENA##_free
+
+Arena *GLOBAL_ARENA = NULL;
+
+void *GLOBAL_ARENA_MALLOC_FN(size_t size) {
+  assert(GLOBAL_ARENA);
+  return arena_alloc(GLOBAL_ARENA, size, sizeof(max_align_t), 1, 0);
+}
+
+void GLOBAL_ARENA_FREE_FN(void *ptr) {}
+#endif
+
 #endif  // ARENA_H
